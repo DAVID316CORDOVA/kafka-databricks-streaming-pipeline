@@ -1,0 +1,15 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.env
+
+# Databricks Bundle
+.databricks/
+.databricks-login.json
+
+# Terraform (si mas adelante agregas IaC para el EC2/Kafka)
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars

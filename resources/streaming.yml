@@ -1,0 +1,21 @@
+resources:
+  jobs:
+    trades_streaming_job:
+      name: trades_streaming_job
+
+      continuous:
+        pause_status: PAUSED
+        # PAUSED por default -- lo activas manualmente desde la UI o con
+        # 'databricks bundle run' cuando quieras que empiece a correr;
+        # evita que se dispare solo apenas lo despliegas.
+
+      tasks:
+        - task_key: bronze_streaming
+          existing_cluster_id: ${var.existing_cluster_id}
+          notebook_task:
+            notebook_path: ../notebooks/bronze_streaming_kafka_consumer.py
+            base_parameters:
+              catalog: ${var.catalog}
+              bronze_schema: ${var.bronze_schema}
+              kafka_topic: ${var.kafka_topic}
+              kafka_bootstrap_servers: ${var.kafka_bootstrap_servers}

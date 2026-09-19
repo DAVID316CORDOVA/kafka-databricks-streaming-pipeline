@@ -1,0 +1,43 @@
+bundle:
+  name: kafka_streaming_pipeline
+
+variables:
+  catalog:
+    default: streaming_project
+  bronze_schema:
+    default: bronze
+  kafka_topic:
+    default: trades-stream
+  kafka_bootstrap_servers:
+    # SIN default a proposito -- la direccion de ngrok cambia cada vez
+    # que reinicias el tunel (a menos que pagues por una IP fija), asi
+    # que se pasa como variable de entorno al desplegar:
+    # BUNDLE_VAR_kafka_bootstrap_servers="0.tcp.ngrok.io:12345"
+    description: "Direccion publica de ngrok que expone el Kafka local (host:puerto)"
+  existing_cluster_id:
+    # Mismo patron que el proyecto fintech: un cluster interactivo ya
+    # existente, porque new_cluster fue rechazado por la API en ese
+    # workspace. Ajusta con el cluster_id real de fintech-cleaning-cluster
+    # (o el que quieras usar) -- lo ves en la URL del cluster en la UI:
+    # .../compute/clusters/<ESTE-ID>
+    description: "ID del cluster clasico interactivo a usar"
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-7405618306957518.18.azuredatabricks.net
+    variables:
+      bronze_schema: bronze_dev
+
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-7405618306957518.18.azuredatabricks.net
+      root_path: /Workspace/Users/felix.david.cordova.garcia@gmail.com/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      bronze_schema: bronze
+
+include:
+  - resources/*.yml
