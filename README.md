@@ -581,6 +581,7 @@ stop on their own, without idling compute. The Bronze job is continuous
 streaming and must be canceled manually from the Databricks UI when done.
 
 
+
 ## Known follow-ups
 
 - Restrict the EC2 Security Group (ports 9092/8090) to Databricks' real
