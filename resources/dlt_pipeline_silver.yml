@@ -3,27 +3,32 @@ resources:
     trades_silver_pipeline:
       name: trades_silver_pipeline
 
-      # El catalogo y el schema de destino se toman de variables del bundle.
-      # El mismo archivo sirve para dev y para prod sin modificarse: solo
-      # cambia el valor de silver_schema segun el target activo con el que
-      # se despliegue.
+      # Destination catalog/schema, pulled from bundle variables -- this
+      # is what makes the exact same file deploy to dev_silver in dev and
+      # silver in prod, with no per-environment duplication.
       catalog: ${var.catalog}
       target: ${var.silver_schema}
 
-      # continuous: false -> el pipeline corre una vez y se detiene (modo
-      # "triggered"). Se dispara manualmente cuando se quiera practicar,
-      # en vez de dejarlo corriendo de forma indefinida.
+      # Triggered mode: runs once over whatever is currently available
+      # upstream, then stops and releases its cluster on its own. No idle
+      # compute risk, unlike the Bronze job above.
       continuous: false
       photon: false
 
       clusters:
         - label: default
-          # Se fuerza el mismo node_type_id que fintech-cleaning-cluster,
-          # porque ese tamaño de VM ya está confirmado disponible dentro de
-          # la cuota de la suscripcion de Azure. El default automatico de
-          # DLT eligio un tamano no disponible (QuotaExceeded).
-          node_type_id: "Standard_D4s_v3"  # confirmado: mismo tamano que fintech-cleaning-cluster
-          num_workers: 0  # single-node: reduce el consumo total de vCPUs
+          # Pinned to the same VM size as the existing interactive
+          # cluster (proven available in this Azure subscription's
+          # quota). DLT's own auto-selected default size hit a
+          # QuotaExceeded error during setup, unrelated to the pipeline
+          # code itself.
+          node_type_id: "Standard_D4s_v3"
+          # Single-node: pay for exactly one VM instead of a
+          # driver+workers split. num_workers: 0 alone isn't enough --
+          # DLT also requires the spark_conf/custom_tags below to
+          # actually provision as single-node; without them it emits a
+          # "Single node cluster is not correctly configured" warning.
+          num_workers: 0
           spark_conf:
             spark.databricks.cluster.profile: singleNode
             spark.master: "local[*]"
@@ -36,5 +41,12 @@ resources:
 
       configuration:
         pipelines.enableTrackHistory: "true"
+        # Read inside the notebook via spark.conf.get(...), NOT
+        # hardcoded as a table name. This is what lets the same Silver
+        # notebook correctly resolve Bronze's real location
+        # (kafka_bronze in dev, bronze in prod) without any code
+        # branching. Hardcoding this once caused a TABLE_OR_VIEW_NOT_FOUND
+        # failure when the pipeline ran against dev with a prod-shaped
+        # table name baked in.
         bronze_catalog: ${var.catalog}
         bronze_schema: ${var.bronze_schema}
