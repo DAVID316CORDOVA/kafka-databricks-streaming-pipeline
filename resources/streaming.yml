@@ -19,3 +19,4 @@ resources:
               bronze_schema: ${var.bronze_schema}
               kafka_topic: ${var.kafka_topic}
               kafka_bootstrap_servers: ${var.kafka_bootstrap_servers}
+              starting_offsets: ${var.starting_offsets}

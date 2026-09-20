@@ -32,6 +32,13 @@ variables:
   kafka_bootstrap_servers:
     description: "Direccion publica del broker de Kafka en el EC2 (host:puerto)"
 
+  # Controla desde donde arranca a leer el job de Bronze la PRIMERA vez.
+  # dev: "earliest" -- ya tienes historial generado, quieres reprocesarlo.
+  # prod: "latest" -- evita releer el backlog completo (seria carisimo);
+  # solo captura trades nuevos a partir del momento del deploy.
+  starting_offsets:
+    default: "earliest"
+
   # ID del cluster interactivo (classic, no serverless) que ejecuta el job
   # de streaming de Bronze. Se usa un cluster ya existente en vez de uno
   # nuevo porque asi lo requiere este workspace. El ID se obtiene de la URL
@@ -62,6 +69,7 @@ targets:
       bronze_schema: bronze
       silver_schema: silver
       gold_schema: gold
+      starting_offsets: "latest"
 
 # Se cargan automaticamente todos los archivos de recursos (jobs,
 # pipelines) que esten dentro de resources/, sin necesidad de listarlos

@@ -18,7 +18,17 @@ resources:
 
       clusters:
         - label: default
-          num_workers: 1
+          # Se fuerza el mismo node_type_id que fintech-cleaning-cluster,
+          # porque ese tamaño de VM ya está confirmado disponible dentro de
+          # la cuota de la suscripcion de Azure. El default automatico de
+          # DLT eligio un tamano no disponible (QuotaExceeded).
+          node_type_id: "Standard_D4s_v3"  # confirmado: mismo tamano que fintech-cleaning-cluster
+          num_workers: 0  # single-node: reduce el consumo total de vCPUs
+          spark_conf:
+            spark.databricks.cluster.profile: singleNode
+            spark.master: "local[*]"
+          custom_tags:
+            ResourceClass: SingleNode
 
       libraries:
         - notebook:
@@ -26,3 +36,5 @@ resources:
 
       configuration:
         pipelines.enableTrackHistory: "true"
+        bronze_catalog: ${var.catalog}
+        bronze_schema: ${var.bronze_schema}

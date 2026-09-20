@@ -11,7 +11,13 @@ resources:
 
       clusters:
         - label: default
-          num_workers: 1
+          node_type_id: "Standard_D4s_v3"  # mismo valor que en dlt_pipeline_silver.yml
+          num_workers: 0
+          spark_conf:
+            spark.databricks.cluster.profile: singleNode
+            spark.master: "local[*]"
+          custom_tags:
+            ResourceClass: SingleNode
 
       libraries:
         - notebook:
@@ -19,3 +25,5 @@ resources:
 
       configuration:
         pipelines.enableTrackHistory: "true"
+        upstream_silver_catalog: ${var.catalog}
+        upstream_silver_schema: ${var.silver_schema}

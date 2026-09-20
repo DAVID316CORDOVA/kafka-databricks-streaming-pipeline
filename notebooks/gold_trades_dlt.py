@@ -8,21 +8,27 @@
 # MAGIC se hace con spark.readStream.table (no con dlt.read), porque la tabla de
 # MAGIC origen pertenece a otro pipeline, no a este.
 
+# COMMAND ----------
+
 import dlt
 from pyspark.sql import functions as F
 
-SILVER_TABLE = "dbw_fintech_fdcg01.silver.trades_clean"
+upstream_silver_catalog = spark.conf.get("upstream_silver_catalog")
+upstream_silver_schema = spark.conf.get("upstream_silver_schema")
+SILVER_TABLE = f"{upstream_silver_catalog}.{upstream_silver_schema}.trades_clean"
 
+# COMMAND ----------
 
-# ---------------------------------------------------------------------------
-# WATERMARKING en la capa Gold
-# ---------------------------------------------------------------------------
-# Se vuelve a declarar un watermark en esta etapa, aunque el pipeline de
-# Silver ya declaro el suyo. Cada etapa de agregacion streaming requiere su
-# propio watermark: es lo que le permite a esta agregacion en particular
-# determinar cuando una ventana de 1 minuto puede considerarse cerrada y
-# emitirse como resultado final, en vez de permanecer abierta de forma
-# indefinida a la espera de mas datos.
+# MAGIC %md
+# MAGIC ## Watermarking en la capa Gold
+# MAGIC
+# MAGIC Se vuelve a declarar un watermark en esta etapa, aunque el pipeline de
+# MAGIC Silver ya declaro el suyo. Cada etapa de agregacion streaming requiere su
+# MAGIC propio watermark: es lo que le permite a esta agregacion en particular
+# MAGIC determinar cuando una ventana de 1 minuto puede considerarse cerrada y
+# MAGIC emitirse como resultado final.
+
+# COMMAND ----------
 
 @dlt.table(
     name="trades_ohlc_1min",
@@ -35,8 +41,8 @@ def trades_ohlc_1min():
     return (
         silver_stream.withWatermark("trade_timestamp", "2 minutes")
         .groupBy(
-            F.col("symbol"),
             F.window("trade_timestamp", "1 minute"),
+            "symbol",
         )
         .agg(
             F.first("price").alias("open"),

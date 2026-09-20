@@ -8,67 +8,70 @@
 # MAGIC el pipeline continua leyendo en modo streaming si Bronze vuelve a
 # MAGIC recibir datos en el futuro.
 
+# COMMAND ----------
+
 import dlt
 from pyspark.sql import functions as F
 
-BRONZE_TABLE = "dbw_fintech_fdcg01.kafka_bronze.trades_raw_kafka"
+bronze_catalog = spark.conf.get("bronze_catalog")
+bronze_schema = spark.conf.get("bronze_schema")
+BRONZE_TABLE = f"{bronze_catalog}.{bronze_schema}.trades_raw_kafka"
 
+# COMMAND ----------
 
-# ---------------------------------------------------------------------------
-# CHECKPOINTING
-# ---------------------------------------------------------------------------
-# A diferencia del job de Bronze (Structured Streaming manual, donde se
-# declaro explicitamente un checkpointLocation dentro de un Volume), en DLT
-# el checkpoint no se configura de forma manual. Cada tabla declarada con
-# @dlt.table recibe su propio checkpoint interno, gestionado automaticamente
-# por el motor de DLT y ligado al pipeline. Ese checkpoint registra, para
-# cada micro-batch procesado, los offsets de origen leidos y el estado de
-# escritura correspondiente, de forma atomica. Es lo que permite que, si el
-# pipeline se detiene o falla y se vuelve a ejecutar, no se reprocesen datos
-# ya escritos ni se pierdan datos a medio procesar. El progreso puede
-# inspeccionarse desde la pestana "Event log" del pipeline en la UI, sin
-# necesidad de acceder a ningun archivo de checkpoint manualmente.
+# MAGIC %md
+# MAGIC ## Checkpointing
+# MAGIC
+# MAGIC A diferencia del job de Bronze (Structured Streaming manual, donde se
+# MAGIC declaro explicitamente un checkpointLocation dentro de un Volume), en DLT
+# MAGIC el checkpoint no se configura de forma manual. Cada tabla declarada con
+# MAGIC @dlt.table recibe su propio checkpoint interno, gestionado automaticamente
+# MAGIC por el motor de DLT y ligado al pipeline. Ese checkpoint registra, para
+# MAGIC cada micro-batch procesado, los offsets de origen leidos y el estado de
+# MAGIC escritura correspondiente, de forma atomica. Es lo que permite que, si el
+# MAGIC pipeline se detiene o falla y se vuelve a ejecutar, no se reprocesen datos
+# MAGIC ya escritos ni se pierdan datos a medio procesar. El progreso puede
+# MAGIC inspeccionarse desde la pestana "Event log" del pipeline en la UI, sin
+# MAGIC necesidad de acceder a ningun archivo de checkpoint manualmente.
+# MAGIC
+# MAGIC ## Watermarking
+# MAGIC
+# MAGIC Se declara un watermark de 2 minutos sobre trade_timestamp. Esto establece
+# MAGIC que el motor de Spark espera hasta 2 minutos por eventos que lleguen fuera
+# MAGIC de orden antes de considerar cerrada una ventana de tiempo. Cualquier
+# MAGIC evento cuyo trade_timestamp sea mas antiguo que (maximo_timestamp_visto -
+# MAGIC 2 minutos) se descarta de forma silenciosa, y el estado interno asociado a
+# MAGIC esa ventana se libera de memoria.
 
-
-# ---------------------------------------------------------------------------
-# WATERMARKING
-# ---------------------------------------------------------------------------
-# Se declara un watermark de 2 minutos sobre trade_timestamp. Esto establece
-# que el motor de Spark espera hasta 2 minutos por eventos que lleguen fuera
-# de orden antes de considerar cerrada una ventana de tiempo. Cualquier
-# evento cuyo trade_timestamp sea mas antiguo que (maximo_timestamp_visto -
-# 2 minutos) se descarta de forma silenciosa, y el estado interno asociado a
-# esa ventana se libera de memoria. Sin este mecanismo, el estado usado para
-# deduplicar u agregar datos streaming crece de forma indefinida, y el
-# cluster eventualmente se queda sin memoria disponible.
+# COMMAND ----------
 
 @dlt.table(
     name="trades_clean",
     comment="Trades limpios y deduplicados, con watermark de 2 minutos",
     table_properties={"quality": "silver"},
 )
-# expect_or_drop: cuando una fila no cumple la condicion, se descarta de
-# forma silenciosa y el pipeline continua su ejecucion con normalidad.
-# Se reserva para problemas de calidad de datos que no son criticos.
 @dlt.expect_or_drop("valid_price", "price > 0")
 @dlt.expect_or_drop("valid_quantity", "quantity > 0")
-# expect_or_fail: cuando una fila no cumple la condicion, la ejecucion del
-# pipeline se detiene con error. Se reserva para violaciones criticas de
-# esquema, donde continuar procesando produciria datos incorrectos en las
-# capas siguientes (en este caso, Gold dependeria de un symbol o timestamp
-# invalido para construir sus ventanas de tiempo).
 @dlt.expect_or_fail(
     "valid_symbol_and_timestamp",
     "symbol IS NOT NULL AND trade_timestamp IS NOT NULL",
 )
 def trades_clean():
-    raw_stream = spark.readStream.table(BRONZE_TABLE)
+    raw_stream = (
+        spark.readStream.table(BRONZE_TABLE)
+        # price y quantity llegan como STRING desde Bronze. Sin este cast
+        # explicito a DOUBLE, Spark intenta convertir implicitamente el
+        # string al comparar contra el 0 de las expectativas, y en modo
+        # ANSI elige BIGINT en vez de DOUBLE -- lo cual falla para
+        # cualquier valor con decimales (ej: "81318.00000000") y hace que
+        # expect_or_drop descarte la fila por error de conversion, no por
+        # una violacion real de la regla de negocio.
+        .withColumn("price", F.col("price").cast("double"))
+        .withColumn("quantity", F.col("quantity").cast("double"))
+    )
 
     return (
         raw_stream.withWatermark("trade_timestamp", "2 minutes")
-        # dropDuplicatesWithinWatermark compara duplicados unicamente dentro
-        # de la ventana de watermark activa, por lo que no se necesita
-        # mantener en memoria el historial completo de trade_id vistos.
         .dropDuplicatesWithinWatermark(["symbol", "trade_id"])
         .select(
             "symbol",

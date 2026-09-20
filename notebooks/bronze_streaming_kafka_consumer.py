@@ -12,25 +12,32 @@
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog", "streaming_project", "Unity Catalog catalog")
+dbutils.widgets.text("catalog", "dbw_fintech_fdcg01", "Unity Catalog catalog")
 dbutils.widgets.text("bronze_schema", "bronze", "Bronze schema")
 dbutils.widgets.text("kafka_topic", "trades-stream", "Kafka topic")
-dbutils.widgets.text("kafka_bootstrap_servers", "", "Kafka bootstrap servers (ngrok address)")
+dbutils.widgets.text("kafka_bootstrap_servers", "", "Kafka bootstrap servers (EC2 address)")
+# NUEVO: controla desde donde empieza a leer la PRIMERA vez que corre.
+# "earliest" = lee todo el historial que exista en el topic (usalo en dev,
+# donde quieres reprocesar los datos que ya generaste).
+# "latest"   = ignora el historial y solo lee mensajes que lleguen a partir
+# de ahora (usalo en prod, para no reprocesar el backlog completo la
+# primera vez que despliegues). Corridas posteriores, en cualquiera de
+# los dos casos, retoman desde el checkpoint, no desde este valor de nuevo.
+dbutils.widgets.text("starting_offsets", "earliest", "Starting offsets (earliest/latest)")
 
 catalog = dbutils.widgets.get("catalog")
 bronze_schema = dbutils.widgets.get("bronze_schema")
 kafka_topic = dbutils.widgets.get("kafka_topic")
 kafka_bootstrap_servers = dbutils.widgets.get("kafka_bootstrap_servers")
+starting_offsets = dbutils.widgets.get("starting_offsets")
 
 print(f"DEBUG - kafka_bootstrap_servers recibido: '{kafka_bootstrap_servers}'")
 print(f"DEBUG - kafka_topic recibido: '{kafka_topic}'")
+print(f"DEBUG - starting_offsets recibido: '{starting_offsets}'")
 
 
 target_table = f"{catalog}.{bronze_schema}.trades_raw_kafka"
 checkpoint_path = f"/Volumes/{catalog}/{bronze_schema}/checkpoints/trades_raw"
-# Ajusta checkpoint_path si no usas Unity Catalog Volumes -- alternativa:
-# un path en DBFS, ej. "/tmp/checkpoints/trades_raw" (no recomendado para
-# produccion real, pero funciona para practicar).
 
 # COMMAND ----------
 
@@ -56,13 +63,15 @@ trade_schema = StructType([
 # MAGIC %md
 # MAGIC ## readStream: conectando al topic de Kafka
 # MAGIC
-# MAGIC `kafka.bootstrap.servers` apunta a tu direccion publica de ngrok
-# MAGIC (ej. "0.tcp.ngrok.io:12345"), no a "localhost:9092" -- Databricks
-# MAGIC corre en la nube, "localhost" ahi seria el propio cluster, no tu PC.
+# MAGIC `kafka.bootstrap.servers` apunta a la IP publica del EC2 donde
+# MAGIC corre el broker (ej. "54.242.249.122:9092"), no a "localhost:9092"
+# MAGIC -- Databricks corre en la nube, "localhost" ahi seria el propio
+# MAGIC cluster, no tu PC.
 # MAGIC
-# MAGIC `startingOffsets: earliest` lee desde el principio del topic la
-# MAGIC primera vez que corre; corridas posteriores retoman desde el
-# MAGIC checkpoint, no desde el principio de nuevo.
+# MAGIC `startingOffsets` ahora viene del widget: "earliest" en dev (lee
+# MAGIC todo el historial), "latest" en prod (ignora el backlog y solo lee
+# MAGIC lo nuevo). Corridas posteriores a la primera siempre retoman desde
+# MAGIC el checkpoint, sin importar este valor.
 
 # COMMAND ----------
 
@@ -71,7 +80,7 @@ raw_stream = (
     .format("kafka")
     .option("kafka.bootstrap.servers", kafka_bootstrap_servers)
     .option("subscribe", kafka_topic)
-    .option("startingOffsets", "earliest")
+    .option("startingOffsets", starting_offsets)
     .load()
 )
 
@@ -81,8 +90,7 @@ raw_stream = (
 # MAGIC ## Parseando el value (bytes JSON) + agregando watermark
 # MAGIC
 # MAGIC Kafka entrega `key` y `value` como bytes crudos -- hay que
-# MAGIC decodificarlos y parsear el JSON manualmente, a diferencia de
-# MAGIC Event Hub donde ya veniamos trabajando con el string directo.
+# MAGIC decodificarlos y parsear el JSON manualmente.
 # MAGIC
 # MAGIC El watermark le dice a Spark "no esperes datos de mas de 2 minutos
 # MAGIC de atraso" -- pasado ese margen, el estado interno para ventanas
@@ -110,10 +118,7 @@ parsed_stream = (
 # MAGIC
 # MAGIC `checkpointLocation` es lo que hace que esto sea resumible de
 # MAGIC verdad: si el cluster se cae o el Job se reinicia, Spark retoma
-# MAGIC exactamente donde se quedo, leyendo el checkpoint -- no hay que
-# MAGIC gestionar manualmente un "ultimo offset visto" como si tocaba
-# MAGIC hacer con `partition_context.update_checkpoint()` en la version de
-# MAGIC Event Hub.
+# MAGIC exactamente donde se quedo, leyendo el checkpoint.
 # MAGIC
 # MAGIC `trigger(processingTime="30 seconds")` hace que el micro-batch
 # MAGIC corra cada 30s en vez de tan rapido como pueda -- mas facil de
