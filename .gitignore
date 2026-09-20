@@ -8,8 +8,8 @@ __pycache__/
 .databricks/
 .databricks-login.json
 
-# Terraform (si mas adelante agregas IaC para el EC2/Kafka)
 *.tfstate
 *.tfstate.*
 .terraform/
 *.tfvars
+olimpo_connect.py

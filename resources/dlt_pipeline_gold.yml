@@ -11,7 +11,9 @@ resources:
 
       clusters:
         - label: default
-          node_type_id: "Standard_D4s_v3"  # mismo valor que en dlt_pipeline_silver.yml
+          # Same reasoning as Silver's pipeline: pinned to a VM size
+          # already proven available, running single-node.
+          node_type_id: "Standard_D4s_v3"
           num_workers: 0
           spark_conf:
             spark.databricks.cluster.profile: singleNode
@@ -25,5 +27,9 @@ resources:
 
       configuration:
         pipelines.enableTrackHistory: "true"
+        # Same pattern as Silver's bronze_catalog/bronze_schema: read via
+        # spark.conf.get(...) inside the notebook instead of a hardcoded
+        # table path, so this pipeline correctly finds Silver's real
+        # location (dev_silver vs. silver) per environment.
         upstream_silver_catalog: ${var.catalog}
         upstream_silver_schema: ${var.silver_schema}

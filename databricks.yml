@@ -2,49 +2,52 @@ bundle:
   name: kafka_streaming_pipeline
 
 variables:
-  # Catalogo de Unity Catalog donde viven todas las tablas del proyecto.
-  # Se reutiliza el catalogo del proyecto fintech porque ya cuenta con una
-  # External Location configurada y funcional.
+  # Unity Catalog catalog where every table in this project lives (bronze,
+  # silver, gold). Reused from the fintech project because it already has
+  # a working External Location configured.
   catalog:
     default: dbw_fintech_fdcg01
 
-  # Schema de la capa Bronze (datos crudos desde Kafka, sin transformar).
+  # Bronze layer schema (raw, unparsed-beyond-schema data from Kafka).
   bronze_schema:
     default: kafka_bronze
 
-  # Schema exclusivo de la capa Silver (tabla trades_clean).
+  # Silver layer schema (trades_clean table).
   silver_schema:
     default: silver
 
-  # Schema exclusivo de la capa Gold (tabla trades_ohlc_1min).
+  # Gold layer schema (trades_ohlc_1min table).
   gold_schema:
     default: gold
 
-  # Nombre del topic de Kafka que lee el consumer de Bronze.
+  # Kafka topic the Bronze consumer reads from.
   kafka_topic:
     default: trades-stream
 
-  # Direccion del broker de Kafka (host:puerto). Sin default de forma
-  # intencional: el broker corre en un EC2 de AWS con IP publica fija, y
-  # esa direccion se pasa como variable de entorno al momento del deploy,
-  # para no dejarla hardcodeada dentro del repositorio:
-  #   BUNDLE_VAR_kafka_bootstrap_servers="54.242.249.122:9092"
+  # Broker address (host:port). No default on purpose: the broker runs on
+  # an EC2 with a non-Elastic public IP, so it can change on instance
+  # restart. Forcing it to be passed explicitly (via env var locally, via
+  # GitHub Secret in CI) avoids a stale hardcoded value being silently
+  # reused after the IP changes:
+  #   BUNDLE_VAR_kafka_bootstrap_servers="<ip>:9092"
   kafka_bootstrap_servers:
-    description: "Direccion publica del broker de Kafka en el EC2 (host:puerto)"
+    description: "Public address of the Kafka broker on EC2 (host:port)"
 
-  # Controla desde donde arranca a leer el job de Bronze la PRIMERA vez.
-  # dev: "earliest" -- ya tienes historial generado, quieres reprocesarlo.
-  # prod: "latest" -- evita releer el backlog completo (seria carisimo);
-  # solo captura trades nuevos a partir del momento del deploy.
+  # ID of the existing classic interactive cluster used by the Bronze job.
+  # An existing cluster is reused instead of a new one because this
+  # workspace requires it that way. Found in the cluster's URL in the UI:
+  # .../compute/clusters/<THIS-ID>
+  existing_cluster_id:
+    description: "ID of the classic interactive cluster used for the Bronze job"
+
+  # Controls where the Bronze job starts reading from on its VERY FIRST
+  # run in a given environment (later runs always resume from the
+  # checkpoint, regardless of this value).
+  # dev:  "earliest" -- there's already a generated history worth keeping.
+  # prod: "latest"   -- avoids re-ingesting the entire Kafka backlog on
+  #                     first deploy, which would be slow and wasteful.
   starting_offsets:
     default: "earliest"
-
-  # ID del cluster interactivo (classic, no serverless) que ejecuta el job
-  # de streaming de Bronze. Se usa un cluster ya existente en vez de uno
-  # nuevo porque asi lo requiere este workspace. El ID se obtiene de la URL
-  # del cluster en la UI: .../compute/clusters/<ESTE-ID>
-  existing_cluster_id:
-    description: "ID del cluster clasico interactivo a usar para el job de Bronze"
 
 targets:
   dev:
@@ -53,17 +56,21 @@ targets:
     workspace:
       host: https://adb-7405618306957518.18.azuredatabricks.net
     variables:
-      # Nota: bronze_schema tiene tambien un default general arriba. Las
-      # dos apariciones deben coincidir en valor, o el deploy termina
-      # apuntando a un schema distinto al que espera el notebook.
+      # NOTE: bronze_schema also has a general default above. Both
+      # occurrences must match, or the deploy silently ends up pointing
+      # at a schema the notebook doesn't expect.
       bronze_schema: kafka_bronze
       silver_schema: dev_silver
       gold_schema: dev_gold
+      starting_offsets: "earliest"
 
   prod:
     mode: production
     workspace:
       host: https://adb-7405618306957518.18.azuredatabricks.net
+      # Required because the CI/CD service principal (terraform-sp)
+      # deploys as itself, not as a human user with a default home
+      # folder -- this gives it an explicit, predictable path.
       root_path: /Workspace/Users/felix.david.cordova.garcia@gmail.com/.bundle/${bundle.name}/${bundle.target}
     variables:
       bronze_schema: bronze
@@ -71,8 +78,7 @@ targets:
       gold_schema: gold
       starting_offsets: "latest"
 
-# Se cargan automaticamente todos los archivos de recursos (jobs,
-# pipelines) que esten dentro de resources/, sin necesidad de listarlos
-# uno por uno en este archivo.
+# Wildcard, not a manual list: any new file dropped into resources/ is
+# picked up automatically on the next deploy, no edit needed here.
 include:
   - resources/*.yml

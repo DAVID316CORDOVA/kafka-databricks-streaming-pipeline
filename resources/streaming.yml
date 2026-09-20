@@ -3,17 +3,31 @@ resources:
     trades_streaming_job:
       name: trades_streaming_job
 
+      # This job is defined as continuous streaming: once started, it
+      # keeps running (and would auto-restart itself on failure) until
+      # manually stopped -- it never finishes on its own like a batch job.
       continuous:
         pause_status: PAUSED
-        # PAUSED por default -- lo activas manualmente desde la UI o con
-        # 'databricks bundle run' cuando quieras que empiece a correr;
-        # evita que se dispare solo apenas lo despliegas.
+        # Starts PAUSED on purpose. Deploying the bundle only registers
+        # the job definition; it never auto-starts consumption from
+        # Kafka. Starting it is always a deliberate, manual action
+        # (via the UI or `databricks bundle run`).
 
       tasks:
         - task_key: bronze_streaming
+          # Reuses an already-provisioned interactive cluster instead of
+          # spinning up a new one per run. Consequence: that cluster's
+          # compute keeps running after this job stops, and must be
+          # terminated manually (or relies on its own auto-termination
+          # setting) -- unlike the DLT pipelines below, which release
+          # their own cluster automatically.
           existing_cluster_id: ${var.existing_cluster_id}
           notebook_task:
             notebook_path: ../notebooks/bronze_streaming_kafka_consumer.py
+            # These are the widget values injected into the notebook at
+            # run time. This is what makes the exact same notebook file
+            # behave differently in dev vs. prod (different schema,
+            # different starting_offsets) without touching any code.
             base_parameters:
               catalog: ${var.catalog}
               bronze_schema: ${var.bronze_schema}
