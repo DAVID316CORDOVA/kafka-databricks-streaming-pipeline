@@ -1,0 +1,28 @@
+resources:
+  pipelines:
+    trades_silver_pipeline:
+      name: trades_silver_pipeline
+
+      # El catalogo y el schema de destino se toman de variables del bundle.
+      # El mismo archivo sirve para dev y para prod sin modificarse: solo
+      # cambia el valor de silver_schema segun el target activo con el que
+      # se despliegue.
+      catalog: ${var.catalog}
+      target: ${var.silver_schema}
+
+      # continuous: false -> el pipeline corre una vez y se detiene (modo
+      # "triggered"). Se dispara manualmente cuando se quiera practicar,
+      # en vez de dejarlo corriendo de forma indefinida.
+      continuous: false
+      photon: false
+
+      clusters:
+        - label: default
+          num_workers: 1
+
+      libraries:
+        - notebook:
+            path: ../notebooks/silver_trades_dlt.py
+
+      configuration:
+        pipelines.enableTrackHistory: "true"

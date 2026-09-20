@@ -1,0 +1,21 @@
+resources:
+  pipelines:
+    trades_gold_pipeline:
+      name: trades_gold_pipeline
+
+      catalog: ${var.catalog}
+      target: ${var.gold_schema}
+
+      continuous: false
+      photon: false
+
+      clusters:
+        - label: default
+          num_workers: 1
+
+      libraries:
+        - notebook:
+            path: ../notebooks/gold_trades_dlt.py
+
+      configuration:
+        pipelines.enableTrackHistory: "true"

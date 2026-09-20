@@ -22,7 +22,11 @@ bronze_schema = dbutils.widgets.get("bronze_schema")
 kafka_topic = dbutils.widgets.get("kafka_topic")
 kafka_bootstrap_servers = dbutils.widgets.get("kafka_bootstrap_servers")
 
-target_table = f"{catalog}.{bronze_schema}.trades_raw"
+print(f"DEBUG - kafka_bootstrap_servers recibido: '{kafka_bootstrap_servers}'")
+print(f"DEBUG - kafka_topic recibido: '{kafka_topic}'")
+
+
+target_table = f"{catalog}.{bronze_schema}.trades_raw_kafka"
 checkpoint_path = f"/Volumes/{catalog}/{bronze_schema}/checkpoints/trades_raw"
 # Ajusta checkpoint_path si no usas Unity Catalog Volumes -- alternativa:
 # un path en DBFS, ej. "/tmp/checkpoints/trades_raw" (no recomendado para

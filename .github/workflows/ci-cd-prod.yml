@@ -1,0 +1,37 @@
+name: ci-cd-prod
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate-and-deploy-prod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Validar el bundle contra prod
+        run: databricks bundle validate -t prod
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          BUNDLE_VAR_kafka_bootstrap_servers: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
+          BUNDLE_VAR_existing_cluster_id: ${{ secrets.DATABRICKS_CLUSTER_ID }}
+
+      - name: Desplegar el bundle a prod
+        run: databricks bundle deploy -t prod
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          BUNDLE_VAR_kafka_bootstrap_servers: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
+          BUNDLE_VAR_existing_cluster_id: ${{ secrets.DATABRICKS_CLUSTER_ID }}
