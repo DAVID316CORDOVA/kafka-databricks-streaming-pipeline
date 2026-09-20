@@ -14,6 +14,18 @@ even though ethusdt trades might interleave on a different partition).
 This is the concrete mechanic behind "how partitions distribute data"
 that you wanted to be able to explain.
 
+Observability note: producer.send() is asynchronous by default -- it
+returns immediately without confirming the message was actually
+delivered. Without a callback, a message that permanently fails after
+Kafka's internal retries are exhausted would fail completely silently.
+The add_callback/add_errback pair below closes that gap. Likewise, the
+internal asyncio.Queue between the WebSocket reader and the Kafka
+publisher has no visibility into its own size by default -- if
+publish_to_kafka() ever falls behind stream_trades() (e.g. the broker
+is slow to respond), the queue would grow with no log telling you so
+until it fills up and starts blocking silently. Logging queue.qsize()
+periodically closes that second gap.
+
 Usage:
     python binance_to_kafka.py
 
@@ -74,7 +86,39 @@ def make_producer() -> KafkaProducer:
         linger_ms=200,
         batch_size=32_768,
         acks="all",  # wait for the broker to confirm the write, not just accept it
+        # NOTE: with replication-factor=1 (single broker, this project's
+        # current setup), acks="all" behaves identically to acks=1 --
+        # there are no follower replicas to wait for. Left as "all" so
+        # this code is already correct if the broker setup ever grows
+        # to multiple replicas.
     )
+
+
+# ---------------------------------------------------------------------
+# Delivery callbacks -- this is what was MISSING before. Without these,
+# producer.send() failures that survive Kafka's internal retries would
+# vanish silently: flush() waits for delivery attempts to finish, but
+# does not itself surface which ones failed.
+# ---------------------------------------------------------------------
+
+def _on_send_success(metadata):
+    # Intentionally quiet on success -- logging every single successful
+    # send would flood the log at this volume. Errors are what we need
+    # to know about immediately.
+    pass
+
+
+def _on_send_error(exc):
+    logger.error("Kafka delivery failed permanently for a message: %s", exc)
+    # This only fires after Kafka's own internal retry attempts (for
+    # transient errors) are exhausted -- so by the time this runs, the
+    # message is genuinely lost, not just delayed. Retrying again
+    # directly from inside this callback is intentionally avoided: the
+    # callback runs on the producer's internal I/O thread, not the main
+    # thread, and re-entering producer.send() from there can interfere
+    # with the producer's own buffering/locking. A production version of
+    # this would push the failed event onto a separate retry queue or a
+    # dead-letter log instead, handled outside this callback.
 
 
 async def stream_trades(queue: "asyncio.Queue[dict]") -> None:
@@ -107,6 +151,9 @@ async def stream_trades(queue: "asyncio.Queue[dict]") -> None:
                     await queue.put(event)
 
         except (websockets.ConnectionClosed, asyncio.TimeoutError, OSError) as exc:
+            # If THIS log line is firing repeatedly, the delay is on
+            # Binance's / the network's side, upstream of your own code --
+            # not a problem with Kafka or the publisher below.
             logger.warning("Connection lost (%s). Reconnecting in %ss...", exc, backoff_seconds)
             await asyncio.sleep(backoff_seconds)
             backoff_seconds = min(backoff_seconds * 2, 30)
@@ -127,11 +174,25 @@ async def publish_to_kafka(queue: "asyncio.Queue[dict]") -> None:
             # every btcusdt trade goes to the same partition as every
             # other btcusdt trade, deterministically, based on the hash
             # of this key.
-            producer.send(KAFKA_TOPIC, key=event["symbol"], value=event)
+            future = producer.send(KAFKA_TOPIC, key=event["symbol"], value=event)
+            future.add_callback(_on_send_success)
+            future.add_errback(_on_send_error)
             sent_count += 1
 
             if sent_count % 100 == 0:
-                logger.info("Sent %d events so far", sent_count)
+                # queue.qsize() is the key addition here: if this number
+                # stays near 0, Kafka is keeping up with Binance's pace
+                # just fine. If it climbs steadily instead of hovering
+                # near 0, THIS side (publishing to Kafka) is the
+                # bottleneck, not Binance's WebSocket -- a sign the
+                # broker or network is slow to respond, worth
+                # investigating before the queue's maxsize=10_000 is
+                # reached and new events start blocking silently.
+                logger.info(
+                    "Sent %d events so far. Queue size: %d",
+                    sent_count,
+                    queue.qsize(),
+                )
                 producer.flush()  # periodic flush so counts/logs stay honest
     finally:
         producer.flush()
