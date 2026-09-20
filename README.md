@@ -10,7 +10,7 @@ production environments.
 ![Architecture diagram](docs/images/architecture_diagram.png)
 
 <details>
-<summary>Text version (fallback)</summary>
+<summary>View as ASCII diagram</summary>
 
 ```
 Binance (WebSocket)
@@ -580,12 +580,6 @@ DLT pipelines use `continuous: false` (triggered mode): they run once and
 stop on their own, without idling compute. The Bronze job is continuous
 streaming and must be canceled manually from the Databricks UI when done.
 
-## Infrastructure as code (Terraform)
-
-**Transparency note**: this project's infrastructure (EC2, Security Group,
-Docker) was set up manually during the practice, not via Terraform. The
-code in `terraform/` documents how that same deployment would be automated
-in a real workflow — it was not executed as part of this project.
 
 ## Known follow-ups
 
